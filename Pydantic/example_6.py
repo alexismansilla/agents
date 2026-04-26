@@ -44,13 +44,12 @@ agent = Agent(
     deps_type=DbDependencies,
     output_type=RespuestaAgente,
     system_prompt=(
-        "Eres un asistente de La Nave Espacial, tienda de productos agrícolas. "
-        "Usa `search_products` para buscar productos por similitud semántica. "
-        "Usa `get_stock` cuando el usuario pregunte por el stock de un producto específico. "
-        "Para el más barato usa search_products con sort_price='asc'. "
-        "Para el más caro usa search_products con sort_price='desc'. "
-        "Si la pregunta no tiene relación con la tienda, responde solo con mensaje: "
-        "'Solo puedo ayudarte con productos de La Nave Espacial.'"
+        "Eres un asistente de ventas para 'La Nave Espacial', una tienda de productos agrícolas. "
+        "Tu objetivo es ayudar a los clientes a encontrar productos, consultar stock y calcular presupuestos de forma amable y concisa.\n\n"
+        "REGLAS DE NEGOCIO:\n"
+        "- Búsquedas específicas: Si el cliente pide lo 'más barato' o 'más económico', debes usar sort_price='asc'. Si pide lo 'más caro', usa sort_price='desc'.\n"
+        "- Guardrails (Límites): Si te preguntan por cualquier tema ajeno a agricultura, botánica o la tienda (ej. política, historia, materiales de construcción), "
+        "niégate a responder y di EXACTAMENTE: 'Solo puedo ayudarte con productos de La Nave Espacial.'"
     ),
 )
 
@@ -149,6 +148,22 @@ def get_stock(ctx: RunContext[DbDependencies], product_name: str) -> str:
         cur.close()
 
 
+@agent.tool
+def calculate_cost(ctx: RunContext[DbDependencies], price: float, quantity: int, discount_percent: float = 0.0) -> str:
+    """Calcula el costo total dados un precio unitario, cantidad y porcentaje de descuento.
+
+    Args:
+        price: Precio unitario del producto.
+        quantity: Cantidad de unidades a comprar.
+        discount_percent: Porcentaje de descuento a aplicar (ej. 10 para 10%).
+    """
+    print(f"[calculate_cost] price={price} quantity={quantity} discount_percent={discount_percent}")
+    total = price * quantity
+    discount_amount = total * (discount_percent / 100)
+    final_total = total - discount_amount
+    return f"Total sin descuento: ${total:,.2f}. Descuento: ${discount_amount:,.2f}. Total final: ${final_total:,.2f} CLP."
+
+
 # --- Main ---
 
 QUERIES = [
@@ -157,6 +172,8 @@ QUERIES = [
     "Cuál es el producto más caro",
     "Fertilizante para la etapa de crecimiento",
     "Alternativas al PLAGRON Power Roots",
+    "¿Cuánto nos costaría comprar 5 PLAGRON Power Roots (250 ml) si tenemos 10% de descuento?",
+    "¿Cuánto nos costaría comprar 5 vigas si tenemos 10% de descuento?",
     "¿Cuál es la capital de Francia?",
 ]
 
