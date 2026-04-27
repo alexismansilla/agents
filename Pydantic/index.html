@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>La Nave Espacial - IA</title>
+    <style>
+        :root {
+            --bg: #111827;
+            --surface: #1f2937;
+            --primary: #10b981;
+            --text: #f9fafb;
+            --muted: #9ca3af;
+        }
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+        .chat-container {
+            width: 100%;
+            max-width: 600px;
+            background: var(--surface);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+        }
+        .header {
+            background: rgba(31, 41, 55, 0.8);
+            padding: 20px;
+            text-align: center;
+            border-bottom: 1px solid #374151;
+        }
+        .header h1 { margin: 0; font-size: 1.5rem; color: var(--primary); }
+        .messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .message {
+            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+        .message.bot {
+            background: #374151;
+            align-self: flex-start;
+            border-bottom-left-radius: 0;
+        }
+        .message.user {
+            background: var(--primary);
+            color: #fff;
+            align-self: flex-end;
+            border-bottom-right-radius: 0;
+        }
+        .input-area {
+            padding: 20px;
+            border-top: 1px solid #374151;
+            display: flex;
+            gap: 10px;
+        }
+        input {
+            flex: 1;
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 1px solid #4b5563;
+            background: #111827;
+            color: var(--text);
+            font-size: 1rem;
+            outline: none;
+        }
+        input:focus { border-color: var(--primary); }
+        button {
+            padding: 12px 24px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover { background: #059669; }
+        button:disabled { background: #4b5563; cursor: not-allowed; }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: var(--surface); }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="header">
+            <h1>🚀 La Nave Espacial</h1>
+            <span style="color: var(--muted); font-size: 0.9rem;">Asistente Virtual IA</span>
+        </div>
+        <div class="messages" id="messages">
+            <div class="message bot">¡Hola! Soy el asistente agrícola de La Nave Espacial. ¿En qué puedo ayudarte?</div>
+        </div>
+        <div class="input-area">
+            <input type="text" id="userInput" placeholder="Pregunta sobre stock, precios..." autocomplete="off">
+            <button id="sendBtn" onclick="sendMessage()">Enviar</button>
+        </div>
+    </div>
+
+    <script>
+        const input = document.getElementById('userInput');
+        const messages = document.getElementById('messages');
+        const sendBtn = document.getElementById('sendBtn');
+
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        async function sendMessage() {
+            const query = input.value.trim();
+            if (!query) return;
+
+            addMessage(query, 'user');
+            input.value = '';
+            input.disabled = true;
+            sendBtn.disabled = true;
+
+            const botMessageEl = addMessage('', 'bot');
+
+            try {
+                const response = await fetch('/chat/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query })
+                });
+
+                if (!response.ok) throw new Error('Error en la API');
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    const chunk = decoder.decode(value, { stream: true });
+                    botMessageEl.innerText += chunk;
+                    messages.scrollTop = messages.scrollHeight;
+                }
+            } catch (error) {
+                botMessageEl.innerText = '⚠️ Ocurrió un error (tal vez cuota excedida).';
+                botMessageEl.style.color = '#ef4444';
+            } finally {
+                input.disabled = false;
+                sendBtn.disabled = false;
+                input.focus();
+            }
+        }
+
+        function addMessage(text, sender) {
+            const div = document.createElement('div');
+            div.className = `message ${sender}`;
+            div.innerText = text;
+            messages.appendChild(div);
+            messages.scrollTop = messages.scrollHeight;
+            return div;
+        }
+    </script>
+</body>
+</html>

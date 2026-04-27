@@ -40,7 +40,7 @@ class RespuestaAgente(BaseModel):
 # --- Agent ---
 
 agent = Agent(
-    model="google-gla:gemini-2.5-flash-lite",
+    model="google-gla:gemini-2.5-flash",
     deps_type=DbDependencies,
     output_type=RespuestaAgente,
     system_prompt=(
@@ -167,11 +167,11 @@ def calculate_cost(ctx: RunContext[DbDependencies], price: float, quantity: int,
 # --- Main ---
 
 QUERIES = [
-    "Stock de PLAGRON – Power Roots (250 ml)",
-    "Necesito el fertilizante más barato",
-    "Cuál es el producto más caro",
-    "Fertilizante para la etapa de crecimiento",
-    "Alternativas al PLAGRON Power Roots",
+    # "Stock de PLAGRON – Power Roots (250 ml)",
+    # "Necesito el fertilizante más barato",
+    # "Cuál es el producto más caro",
+    # "Fertilizante para la etapa de crecimiento",
+    # "Alternativas al PLAGRON Power Roots",
     "¿Cuánto nos costaría comprar 5 PLAGRON Power Roots (250 ml) si tenemos 10% de descuento?",
     "¿Cuánto nos costaría comprar 5 vigas si tenemos 10% de descuento?",
     "¿Cuál es la capital de Francia?",
@@ -204,6 +204,8 @@ async def main():
     try:
         for query in QUERIES:
             await run_query(query, deps)
+            # Agregar un pequeño retraso para no saturar la cuota gratuita
+            await asyncio.sleep(2)
     finally:
         conn.close()
 
