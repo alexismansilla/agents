@@ -16,6 +16,17 @@ load_dotenv()
 if "GEMINI_API_KEY" in os.environ:
     os.environ["GOOGLE_API_KEY"] = os.environ["GEMINI_API_KEY"]
 
+MAX_HISTORY_MESSAGES = 6
+MAX_EMBEDDING_CACHE = 200
+
+_embedding_cache: dict[str, list] = {}
+
+# dev  → groq:llama-3.3-70b-versatile  (14,400 req/día gratis, muy rápido)
+# prod → google-gla:gemini-2.5-flash-lite
+_ENV = os.getenv("APP_ENV", "dev")
+_MODEL = "groq:llama-3.3-70b-versatile" if _ENV == "dev" else "google-gla:gemini-2.5-flash-lite"
+print(f"[CONFIG] entorno={_ENV} modelo={_MODEL}")
+
 
 # --- Dependencies ---
 
@@ -28,23 +39,30 @@ class DbDependencies:
 # --- Agent ---
 
 agent = Agent(
-    model="google-gla:gemini-2.5-flash-lite",
+    model=_MODEL,
     deps_type=DbDependencies,
     system_prompt=(
-        "Eres un asistente de ventas para 'La Nave Espacial', una tienda de productos agrícolas. "
-        "Tu objetivo es ayudar a los clientes a encontrar productos, consultar stock y calcular presupuestos de forma amable y concisa.\n\n"
-        "REGLAS DE NEGOCIO:\n"
-        "- Búsquedas específicas: Si el cliente pide lo 'más barato' o 'más económico', debes usar sort_price='asc'. Si pide lo 'más caro', usa sort_price='desc'.\n"
-        "- Guardrails (Límites): Si te preguntan por cualquier tema ajeno a agricultura, botánica o la tienda (ej. política, historia, materiales de construcción), "
-        "niégate a responder y di EXACTAMENTE: 'Solo puedo ayudarte con productos de La Nave Espacial.'\n"
-        "- Formato de productos: Siempre que presentes un producto, MUÉSTRALO EXACTAMENTE con la siguiente estructura (reemplazando los corchetes):\n\n"
-        "El producto [más caro/más barato/buscado] es:\n"
-        "[Nombre del producto]\n"
-        "precio: [Precio] CLP\n"
-        "link: [URL]\n"
-        "stock: [Stock disponible]\n"
+        "Eres un asistente de ventas de 'La Nave Espacial', tienda de productos agrícolas. "
+        "Usa SIEMPRE las herramientas disponibles para buscar productos antes de responder. "
+        "Si piden el más barato usa sort_price='asc', el más caro usa sort_price='desc'. "
+        "Al mostrar un producto incluye: nombre, precio en CLP, link y stock. "
+        "Si te preguntan algo ajeno a agricultura o la tienda, responde solo: "
+        "'Solo puedo ayudarte con productos de La Nave Espacial.'"
     ),
 )
+
+
+# --- Helpers ---
+
+def get_embedding(client: Any, query: str) -> list:
+    if query not in _embedding_cache:
+        if len(_embedding_cache) >= MAX_EMBEDDING_CACHE:
+            _embedding_cache.clear()
+        _embedding_cache[query] = client.models.embed_content(
+            model="gemini-embedding-2",
+            contents=[query],
+        ).embeddings[0].values
+    return _embedding_cache[query]
 
 
 # --- Tools ---
@@ -66,12 +84,9 @@ def search_products(
     if sort_price in ("asc", "desc"):
         limit = 5
 
-    print(f"[search_products] query='{query}' limit={limit} sort_price={sort_price}")
+    print(f"[search_products] query='{query}' limit={limit} sort_price={sort_price} cache_size={len(_embedding_cache)}")
 
-    embedding = ctx.deps.client.models.embed_content(
-        model="gemini-embedding-2",
-        contents=[query],
-    ).embeddings[0].values
+    embedding = get_embedding(ctx.deps.client, query)
 
     cur = ctx.deps.conn.cursor()
     try:
@@ -96,14 +111,11 @@ def search_products(
 
         tags = {"asc": "[MÁS ECONÓMICO]", "desc": "[MÁS CARO]", "none": ""}
 
-        lines = ["Productos encontrados:"]
+        lines = ["Productos:"]
         for idx, (nombre, precio, desc, stock, url) in enumerate(rows, 1):
             tag = f" {tags[sort_price]}" if sort_price != "none" and idx == 1 else ""
             lines.append(
-                f"{idx}. {nombre}{tag}\n"
-                f"   Precio: ${precio:,} CLP | Stock: {stock}\n"
-                f"   URL: {url}\n"
-                f"   Descripción: {desc[:150]}..."
+                f"{idx}.{tag} {nombre} | ${precio:,} CLP | stock:{stock} | {url} | {desc[:80]}"
             )
 
         return "\n".join(lines)
@@ -243,19 +255,28 @@ async def chat_stream(request: ChatRequest):
     async def generar_respuesta():
         try:
             deps = DbDependencies(conn=conn, client=genai_client)
-            history = session_history.get(request.session_id, [])
+            history = session_history.get(request.session_id, [])[-MAX_HISTORY_MESSAGES:]
 
             async with agent.run_stream(request.query, deps=deps, message_history=history) as result:
                 async for chunk in result.stream_text(delta=True):
                     yield chunk
 
-            session_history[request.session_id] = result.all_messages()
+            all_msgs = result.all_messages()
+            session_history[request.session_id] = all_msgs
+            usage = result.usage()
+            print(f"[TOKENS] request={usage.request_tokens} response={usage.response_tokens} total={usage.total_tokens}")
         except Exception as e:
             yield f"\n[Error: {e}]"
         finally:
             db_pool.putconn(conn)
 
     return StreamingResponse(generar_respuesta(), media_type="text/event-stream")
+
+
+@app.delete("/chat/history/{session_id}")
+async def clear_history(session_id: str):
+    session_history.pop(session_id, None)
+    return {"cleared": session_id}
 
 
 if __name__ == "__main__":
