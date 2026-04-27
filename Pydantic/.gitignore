@@ -5,3 +5,4 @@ __pycache__/
 CLAUDE.md
 data/
 .vscode/
+.claude/
